@@ -54,6 +54,7 @@ services:
     depends_on:
       - pepper-service
     environment:
+      RUST_LOG: info
       # Hardening knobs (defaults are sane; uncomment to override).
       # See README-movement.md for the full list and meanings.
       #
