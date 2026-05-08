@@ -24,8 +24,11 @@ use std::{collections::HashMap, sync::Arc};
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn test_options_request() {
-    // Send an OPTIONS preflight request to a registered path
+async fn test_options_request_returns_200_without_cors_headers_by_default() {
+    // OPTIONS to a registered path returns 200 OK. CORS headers are
+    // emitted only when PROVER_ALLOWED_ORIGINS is configured (Task 9
+    // moved CORS to a tower-http layer); without the layer the response
+    // has no Access-Control-* headers.
     let response = send_request_to_path(
         Method::OPTIONS,
         HEALTH_CHECK_PATH,
@@ -37,21 +40,67 @@ async fn test_options_request() {
     )
     .await;
 
-    // Assert that the response status is OK
     assert_eq!(response.status(), StatusCode::OK);
-
-    // Verify the response headers
     let headers = response.headers();
-    assert_eq!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(), "");
+    assert!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).is_none());
+    assert!(headers.get(ACCESS_CONTROL_ALLOW_CREDENTIALS).is_none());
+    assert!(headers.get(ACCESS_CONTROL_ALLOW_HEADERS).is_none());
+    assert!(headers.get(ACCESS_CONTROL_ALLOW_METHODS).is_none());
+}
+
+#[tokio::test]
+async fn test_cors_allowlist_grants_only_listed_origin() {
+    use tower_http::cors::{AllowOrigin, CorsLayer};
+
+    let allowed = "https://wallet.example.com";
+    let blocked = "https://attacker.example.com";
+
+    // Build a router with a tower-http CorsLayer matching what
+    // main.rs would build from a non-empty PROVER_ALLOWED_ORIGINS.
+    let prover_service_state = Arc::new(ProverServiceState::new_for_testing(
+        TrainingWheelsKeyPair::new_for_testing(),
+        Arc::new(ProverServiceConfig::default()),
+        DeploymentInformation::default(),
+        Arc::new(Mutex::new(HashMap::new())),
+        FederatedJWKs::new_empty(),
+    ));
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::list([allowed.parse().unwrap()]))
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([axum::http::header::CONTENT_TYPE]);
+    let router: Router = Router::new()
+        .route(
+            HEALTH_CHECK_PATH,
+            get(handler::healthcheck_handler).options(handler::options_handler),
+        )
+        .with_state(prover_service_state)
+        .layer(cors);
+
+    // Allowed origin → ACAO header echoes the request origin.
+    let req = Request::builder()
+        .uri(format!("http://127.0.0.1{}", HEALTH_CHECK_PATH))
+        .method(Method::OPTIONS)
+        .header("origin", allowed)
+        .header("access-control-request-method", "GET")
+        .body(Body::empty())
+        .unwrap();
+    let resp = router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(
-        headers.get(ACCESS_CONTROL_ALLOW_CREDENTIALS).unwrap(),
-        "true"
+        resp.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(),
+        allowed
     );
-    assert_eq!(headers.get(ACCESS_CONTROL_ALLOW_HEADERS).unwrap(), "*");
-    assert_eq!(
-        headers.get(ACCESS_CONTROL_ALLOW_METHODS).unwrap(),
-        "GET, POST, OPTIONS"
-    );
+
+    // Disallowed origin → no ACAO header.
+    let req = Request::builder()
+        .uri(format!("http://127.0.0.1{}", HEALTH_CHECK_PATH))
+        .method(Method::OPTIONS)
+        .header("origin", blocked)
+        .header("access-control-request-method", "GET")
+        .body(Body::empty())
+        .unwrap();
+    let resp = router.oneshot(req).await.unwrap();
+    assert!(resp.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN).is_none());
 }
 
 #[tokio::test]

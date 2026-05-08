@@ -4,6 +4,7 @@ use aptos_crypto::ed25519::Ed25519PrivateKey;
 use aptos_crypto::ValidCryptoMaterialStringExt;
 use aptos_logger::{error, info, warn};
 use axum::extract::{DefaultBodyLimit, Request};
+use axum::http::{HeaderValue, Method};
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::{get, post};
@@ -16,6 +17,7 @@ use prover_service::request_handler::{deployment_information, handler, prover_ha
 use prover_service::*;
 use std::time::Instant;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -123,6 +125,33 @@ fn body_limit_bytes_from_env() -> usize {
         .unwrap_or(64 * 1024)
 }
 
+/// Build a `CorsLayer` from `PROVER_ALLOWED_ORIGINS` (comma-separated).
+///
+/// Empty / unset → no CORS headers are emitted; cross-origin browser
+/// callers are blocked by the browser's same-origin policy.
+/// Non-empty → strict allowlist; only the listed origins receive
+/// `Access-Control-Allow-Origin`. CORS does NOT defend against
+/// server-to-server callers; that's the rate-limit + aud-allowlist +
+/// JWT-signature checks' job.
+fn cors_layer_from_env() -> Option<CorsLayer> {
+    let raw = std::env::var("PROVER_ALLOWED_ORIGINS").ok()?;
+    let origins: Vec<HeaderValue> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| HeaderValue::from_str(s).ok())
+        .collect();
+    if origins.is_empty() {
+        return None;
+    }
+    Some(
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::list(origins))
+            .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+            .allow_headers([axum::http::header::CONTENT_TYPE]),
+    )
+}
+
 /// Records request handling metrics + non-success logging.
 /// Wraps every route as an axum middleware (preserves the behavior of
 /// the original hyper-level wrapper at the equivalent location).
@@ -168,7 +197,17 @@ async fn start_prover_service(
     let body_limit_bytes = body_limit_bytes_from_env();
     info!("Body size limit set to {} bytes", body_limit_bytes);
 
-    let router = Router::new()
+    let cors_layer = cors_layer_from_env();
+    if cors_layer.is_some() {
+        info!("CORS allowlist configured from PROVER_ALLOWED_ORIGINS");
+    } else {
+        info!(
+            "No CORS allowlist configured (PROVER_ALLOWED_ORIGINS unset/empty); \
+             cross-origin browser callers will be blocked by same-origin policy"
+        );
+    }
+
+    let mut router = Router::new()
         .route(
             handler::ABOUT_PATH,
             get(handler::about_handler).options(handler::options_handler),
@@ -192,6 +231,10 @@ async fn start_prover_service(
         .layer(DefaultBodyLimit::max(body_limit_bytes))
         .with_state(prover_service_state)
         .layer(axum::middleware::from_fn(metrics_logging_middleware));
+
+    if let Some(cors) = cors_layer {
+        router = router.layer(cors);
+    }
 
     let socket_addr = SocketAddr::from(([0, 0, 0, 0], prover_service_port));
     let listener = match tokio::net::TcpListener::bind(&socket_addr).await {

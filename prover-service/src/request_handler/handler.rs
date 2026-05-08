@@ -7,10 +7,7 @@ use crate::request_handler::prover_state::ProverServiceState;
 use aptos_logger::error;
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::header::{
-    ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
-    ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE,
-};
+use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, Response, StatusCode};
 use std::sync::Arc;
 
@@ -45,15 +42,17 @@ const HEALTH_CHECK_OK_MESSAGE: &str = "OK";
 // Unexpected error message constant
 const UNEXPECTED_ERROR_MESSAGE: &str = "An unexpected error was encountered!";
 
-/// Returns a response builder prepopulated with common headers
+/// Returns a response builder for the given status code.
+///
+/// CORS headers are NOT set here — they're emitted by the
+/// `tower_http::cors::CorsLayer` configured in `main.rs` from
+/// `PROVER_ALLOWED_ORIGINS`. Setting them inline would conflict with
+/// the layer (CorsLayer overrides duplicates).
 pub fn create_response_builder(
-    origin: String,
+    _origin: String,
     status_code: StatusCode,
 ) -> axum::http::response::Builder {
-    Response::builder()
-        .status(status_code)
-        .header(ACCESS_CONTROL_ALLOW_ORIGIN, origin)
-        .header(ACCESS_CONTROL_ALLOW_CREDENTIALS, "true")
+    Response::builder().status(status_code)
 }
 
 /// Generates a 400 response for bad requests
@@ -143,12 +142,13 @@ pub async fn jwk_handler(
     generate_jwt_cache_response(origin, state.jwk_cache())
 }
 
-/// OPTIONS preflight (same response regardless of path)
-pub async fn options_handler(headers: HeaderMap) -> Response<Body> {
-    let origin = get_request_origin(&headers);
-    create_response_builder(origin, StatusCode::OK)
-        .header(ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, OPTIONS")
-        .header(ACCESS_CONTROL_ALLOW_HEADERS, "*")
+/// OPTIONS preflight handler. Returns 200 OK with empty body — the
+/// `tower_http::cors::CorsLayer` in `main.rs` adds the
+/// `Access-Control-Allow-{Origin,Methods,Headers}` headers based on
+/// the configured `PROVER_ALLOWED_ORIGINS` allowlist.
+pub async fn options_handler(_headers: HeaderMap) -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::OK)
         .body(Body::empty())
         .expect("Failed to build options response!")
 }
