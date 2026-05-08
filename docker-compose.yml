@@ -43,7 +43,14 @@ services:
       #   PEPPER_TRUSTED_PROXY_CIDRS: 10.0.0.0/8
     volumes:
       - ./secrets/pepper:/run/secrets/pepper:ro
-    # No port mapping on purpose: only the prover talks to pepper-service.
+    ports:
+      # Expose pepper-service to the host so the wallet (browser) can fetch
+      # the per-user pepper directly. In the Aptos architecture pepper-
+      # service is a first-class endpoint the wallet calls before the
+      # prover; only the wallet ↔ pepper-service ↔ prover flow needs
+      # network reach, but for local dev exposing it on the host keeps
+      # the wallet config consistent across environments.
+      - "3002:3002"
 
   prover-service:
     build:
