@@ -291,6 +291,38 @@ async fn test_prove_request_bad_request() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
+#[tokio::test]
+async fn test_body_size_limit_returns_413() {
+    use axum::extract::DefaultBodyLimit;
+
+    // Build a router with an explicit small body limit (8 bytes).
+    let prover_service_state = Arc::new(ProverServiceState::new_for_testing(
+        TrainingWheelsKeyPair::new_for_testing(),
+        Arc::new(ProverServiceConfig::default()),
+        DeploymentInformation::default(),
+        Arc::new(Mutex::new(HashMap::new())),
+        FederatedJWKs::new_empty(),
+    ));
+    let router: Router = Router::new()
+        .route(
+            handler::PROVE_PATH,
+            post(crate::request_handler::prover_handler::prove_handler),
+        )
+        .layer(DefaultBodyLimit::max(8))
+        .with_state(prover_service_state);
+
+    // POST a body well over the limit.
+    let oversize = vec![b'A'; 100];
+    let request = Request::builder()
+        .uri(format!("http://127.0.0.1{}", PROVE_PATH))
+        .method(Method::POST)
+        .header("content-type", "application/json")
+        .body(Body::from(oversize))
+        .unwrap();
+    let response = router.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
 /// Gets the response body as a string
 async fn get_response_body_string(response: Response<Body>) -> String {
     let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)

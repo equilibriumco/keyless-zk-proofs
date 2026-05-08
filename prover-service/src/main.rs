@@ -3,7 +3,7 @@
 use aptos_crypto::ed25519::Ed25519PrivateKey;
 use aptos_crypto::ValidCryptoMaterialStringExt;
 use aptos_logger::{error, info, warn};
-use axum::extract::Request;
+use axum::extract::{DefaultBodyLimit, Request};
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::{get, post};
@@ -113,6 +113,16 @@ fn load_training_wheels_key_pair(
     }
 }
 
+/// Read PROVER_BODY_LIMIT_BYTES from env (default 65536 = 64 KiB).
+/// Real prove requests are well under this; the limit is a basic
+/// resource-exhaustion guard against oversized POST bodies.
+fn body_limit_bytes_from_env() -> usize {
+    std::env::var("PROVER_BODY_LIMIT_BYTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(64 * 1024)
+}
+
 /// Records request handling metrics + non-success logging.
 /// Wraps every route as an axum middleware (preserves the behavior of
 /// the original hyper-level wrapper at the equivalent location).
@@ -155,6 +165,9 @@ async fn start_prover_service(
         prover_service_port
     );
 
+    let body_limit_bytes = body_limit_bytes_from_env();
+    info!("Body size limit set to {} bytes", body_limit_bytes);
+
     let router = Router::new()
         .route(
             handler::ABOUT_PATH,
@@ -176,6 +189,7 @@ async fn start_prover_service(
             handler::PROVE_PATH,
             post(prover_handler::prove_handler).options(handler::options_handler),
         )
+        .layer(DefaultBodyLimit::max(body_limit_bytes))
         .with_state(prover_service_state)
         .layer(axum::middleware::from_fn(metrics_logging_middleware));
 
