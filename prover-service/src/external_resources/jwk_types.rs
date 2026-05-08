@@ -109,6 +109,17 @@ pub trait JWKIssuerInterface {
 
     /// Fetches the JWKs from the issuer's JWK URL
     async fn fetch_jwks(&self) -> Result<HashMap<KeyID, Arc<RSA_JWK>>>;
+
+    /// Fetches the JWKs from the issuer's JWK URL plus the recommended
+    /// next-refresh duration parsed from the response's `Cache-Control:
+    /// max-age=...` header (when present and not overridden by `no-store`
+    /// / `no-cache` / `must-revalidate`). Default impl delegates to
+    /// [`fetch_jwks`] and returns `None` for the TTL.
+    async fn fetch_jwks_with_ttl(
+        &self,
+    ) -> Result<(HashMap<KeyID, Arc<RSA_JWK>>, Option<std::time::Duration>)> {
+        self.fetch_jwks().await.map(|keys| (keys, None))
+    }
 }
 
 /// A simple JWK issuer struct
@@ -144,5 +155,11 @@ impl JWKIssuerInterface for JWKIssuer {
 
     async fn fetch_jwks(&self) -> Result<HashMap<KeyID, Arc<RSA_JWK>>> {
         jwk_fetcher::fetch_jwks(&self.issuer_jwk_url).await
+    }
+
+    async fn fetch_jwks_with_ttl(
+        &self,
+    ) -> Result<(HashMap<KeyID, Arc<RSA_JWK>>, Option<std::time::Duration>)> {
+        jwk_fetcher::fetch_jwks_with_ttl(&self.issuer_jwk_url).await
     }
 }
