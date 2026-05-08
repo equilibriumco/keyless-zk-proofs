@@ -245,9 +245,19 @@ pub fn sign(
     private_key.sign(&message_to_sign)
 }
 
-/// Validates the signature of the given JWT using the provided JWK
+/// Validates the signature of the given JWT using the provided JWK.
+///
+/// `validate_aud` is disabled here because (a) jsonwebtoken 9.3+ errors
+/// with `InvalidAudience` whenever the token has an `aud` claim and
+/// `validation.aud` is `None` (every keyless JWT has an `aud` — the
+/// OAuth client_id), and (b) we enforce our own aud allowlist via
+/// `PROVER_ALLOWED_AUDS` in `check_aud_allowlist` before this function
+/// is called. Letting jsonwebtoken own aud-policy would force the prover
+/// to know every wallet's `client_id` ahead of time, which is exactly
+/// what `PROVER_ALLOWED_AUDS` is for.
 pub fn validate_jwt_signature(jwk: &RSA_JWK, jwt: &str) -> anyhow::Result<()> {
-    let validation = Validation::new(Algorithm::RS256);
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.validate_aud = false;
     let decoding_key = &DecodingKey::from_rsa_components(&jwk.n, &jwk.e)?;
     let _claims = jsonwebtoken::decode::<Claims>(jwt, decoding_key, &validation)?;
 
