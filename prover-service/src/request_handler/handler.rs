@@ -69,6 +69,17 @@ pub fn generate_internal_server_error_response(origin: String) -> Response<Body>
     )
 }
 
+/// Generates a 429 response for rate-limited requests. The body
+/// intentionally does not disclose the bucketing dimension (per-IP vs
+/// per-(iss, sub)) so an attacker cannot probe for sub-keys.
+pub fn generate_too_many_requests_response(origin: String) -> Response<Body> {
+    generate_json_response(
+        origin,
+        StatusCode::TOO_MANY_REQUESTS,
+        r#"{"error":"rate limit exceeded"}"#.to_string(),
+    )
+}
+
 /// Generates a JSON response with the given status code and body string
 pub fn generate_json_response(
     origin: String,

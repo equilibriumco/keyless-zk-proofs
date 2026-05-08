@@ -104,6 +104,13 @@ async fn handle_prove_request_inner(
                 metrics::update_jwt_attribute_metrics(&verified_input);
                 verified_input
             }
+            Err(ProverServiceError::SubRateLimited) => {
+                warn!(
+                    "/v0/prove rejected: per-(iss,sub) rate limit exceeded; origin={}",
+                    origin
+                );
+                return handler::generate_too_many_requests_response(origin);
+            }
             Err(error) => {
                 let error_string =
                     format!("Failed to validate prove request input! Error: {}", error);
@@ -470,23 +477,18 @@ async fn validate_prove_request_input(
     // Start the validation timer
     let validation_timer = Instant::now();
 
-    // Validate the prove request input
-    let verified_input = match training_wheels::preprocess_and_validate_request(
+    // Validate the prove request input. preprocess_and_validate_request
+    // returns ProverServiceError::SubRateLimited (charged after JWT
+    // signature verification) or ::BadRequest with a wrapped message;
+    // pass them through unchanged so the outer caller can map each to
+    // the right HTTP status code (429 vs 400 respectively).
+    let verified_input = training_wheels::preprocess_and_validate_request(
         prover_service_state,
         prove_request_input,
         prover_service_state.jwk_cache(),
         prover_service_state.federated_jwks(),
     )
-    .await
-    {
-        Ok(verified_input) => verified_input,
-        Err(error) => {
-            return Err(ProverServiceError::BadRequest(format!(
-                "Prove request input validation failed! Error: {}",
-                error
-            )));
-        }
-    };
+    .await?;
 
     // Update the validation metrics
     metrics::update_prove_request_breakdown_metrics(

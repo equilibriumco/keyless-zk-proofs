@@ -15,6 +15,7 @@ use aptos_crypto::{
 use aptos_keyless_common::input_processing::circuit_config::CircuitConfig;
 use aptos_keyless_common::input_processing::encoding::AsFr;
 use aptos_keyless_common::input_processing::jwt::DecodedJWT;
+use aptos_keyless_common::rate_limit::{check_sub, sub_key};
 use aptos_keyless_common::types::PoseidonHash;
 use aptos_types::jwks::rsa::RSA_JWK;
 use aptos_types::keyless::Claims;
@@ -77,20 +78,74 @@ async fn get_jwk(
 /// Pre-processes and validates a prover service request under training-wheels mode.
 /// All training-wheel checks go here, and if a request passes this successfully, we
 /// should be convinced that the *public statement* to be proved is correct.
+///
+/// Returns `Err(ProverServiceError::SubRateLimited)` if the request would
+/// exceed the per-(iss, sub) rate limit. The rate-limit bucket is charged
+/// only AFTER `validate_jwt_signature` succeeds — charging earlier would
+/// let an attacker holding a forged JWT drain the legitimate user's
+/// bucket. Other validation failures map to `BadRequest`.
 pub async fn preprocess_and_validate_request(
     prover_service_state: &ProverServiceState,
     request_input: &RequestInput,
     jwk_cache: JWKCache,
     federated_jwks: FederatedJWKs<FederatedJWKIssuer>,
-) -> anyhow::Result<VerifiedInput> {
+) -> Result<VerifiedInput, ProverServiceError> {
     // Get the decoded JWT and the JWK
-    let jwt = DecodedJWT::from_b64(&request_input.jwt_b64)?;
+    let jwt = DecodedJWT::from_b64(&request_input.jwt_b64).map_err(to_bad_request)?;
     let prover_service_config = prover_service_state.prover_service_config();
-    let jwk = get_jwk(&prover_service_config, &jwt, jwk_cache, federated_jwks).await?;
+    let jwk = get_jwk(&prover_service_config, &jwt, jwk_cache, federated_jwks)
+        .await
+        .map_err(to_bad_request)?;
 
     // Validate the JWT signature.
     // Keyless relation condition 10 captured: https://github.com/aptos-foundation/AIPs/blob/f133e29d999adf31c4f41ce36ae1a808339af71e/aips/aip-108.md?plain=1#L95
-    validate_jwt_signature(jwk.as_ref(), &request_input.jwt_b64)?;
+    validate_jwt_signature(jwk.as_ref(), &request_input.jwt_b64).map_err(to_bad_request)?;
+
+    // Charge the per-(iss, sub) rate limit. Reachable only after
+    // signature verification — see this function's doc-comment.
+    // sub is technically optional in JWT; subless JWTs fall into a
+    // shared bucket per issuer (preferable to bypassing the limit).
+    let sub = jwt.payload.sub.as_deref().unwrap_or("");
+    check_sub_rate_limit(prover_service_state, &jwt.payload.iss, sub)?;
+
+    preprocess_and_validate_after_sig(prover_service_state, request_input, jwk, jwt)
+        .map_err(to_bad_request)
+}
+
+fn to_bad_request(e: anyhow::Error) -> ProverServiceError {
+    ProverServiceError::BadRequest(e.to_string())
+}
+
+/// Charges the per-(iss, sub) rate-limit bucket for a JWT whose
+/// signature has just been verified. Reachable only after
+/// `validate_jwt_signature` succeeds (see `preprocess_and_validate_request`)
+/// — charging earlier would let an attacker holding a forged JWT drain
+/// a real user's bucket.
+pub fn check_sub_rate_limit(
+    prover_service_state: &ProverServiceState,
+    iss: &str,
+    sub: &str,
+) -> Result<(), ProverServiceError> {
+    let Some(limiter) = prover_service_state.sub_limiter() else {
+        return Ok(());
+    };
+    if check_sub(Some(limiter.as_ref()), sub_key(iss, sub)).is_err() {
+        return Err(ProverServiceError::SubRateLimited);
+    }
+    Ok(())
+}
+
+/// Continues request validation after JWT signature verification and
+/// rate-limit accounting. Split out so the outer function only deals
+/// with the `SubRateLimited` branch; everything in here maps cleanly to
+/// `BadRequest`.
+fn preprocess_and_validate_after_sig(
+    prover_service_state: &ProverServiceState,
+    request_input: &RequestInput,
+    jwk: Arc<RSA_JWK>,
+    jwt: DecodedJWT,
+) -> anyhow::Result<VerifiedInput> {
+    let prover_service_config = prover_service_state.prover_service_config();
 
     // Note: we allow JWT time-based checks to be disabled for testing purposes.
     // This is currently relied on by the TS SDK tests (against the devnet prover service).

@@ -13,6 +13,12 @@ pub enum ProverServiceError {
     InternalError(String),
     #[error("Unexpected error: {0}")]
     UnexpectedError(String),
+    /// Rate limit on the (iss, sub) pair from the request's JWT was
+    /// exceeded. Charged only after `validate_jwt_signature` succeeds, so
+    /// this is reachable only with a JWT that genuinely belongs to the
+    /// targeted user.
+    #[error("Per-user rate limit exceeded")]
+    SubRateLimited,
 }
 
 impl From<anyhow::Error> for ProverServiceError {

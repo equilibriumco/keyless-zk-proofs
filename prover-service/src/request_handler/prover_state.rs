@@ -4,6 +4,8 @@ use crate::external_resources::prover_config::ProverServiceConfig;
 use crate::request_handler::deployment_information::DeploymentInformation;
 use aptos_crypto::ed25519::{Ed25519PrivateKey, Ed25519PublicKey};
 use aptos_keyless_common::input_processing::circuit_config::CircuitConfig;
+use aptos_keyless_common::rate_limit::{self, SubLimiter};
+use aptos_logger::warn;
 use rust_rapidsnark::FullProver;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
@@ -26,6 +28,10 @@ pub struct ProverServiceState {
     /// of queuing — proof generation is CPU-heavy and a queue under load
     /// just translates to head-of-line latency for everyone.
     prove_semaphore: Arc<Semaphore>,
+    /// Per-(iss, sub) rate limiter. Charged only after successful JWT
+    /// signature verification, so an attacker holding a forged JWT cannot
+    /// drain a real user's bucket. `None` disables the limit.
+    sub_limiter: Option<Arc<SubLimiter>>,
 }
 
 impl ProverServiceState {
@@ -44,6 +50,7 @@ impl ProverServiceState {
             .expect("Failed to create the full prover!");
 
         let max_concurrency = prove_max_concurrency_from_env();
+        let sub_limiter = sub_limiter_from_env();
 
         // Create the prover service state
         ProverServiceState {
@@ -55,6 +62,7 @@ impl ProverServiceState {
             jwk_cache,
             federated_jwks,
             prove_semaphore: Arc::new(Semaphore::new(max_concurrency)),
+            sub_limiter,
         }
     }
 
@@ -103,7 +111,30 @@ impl ProverServiceState {
             jwk_cache,
             federated_jwks,
             prove_semaphore: Arc::new(Semaphore::new(semaphore_capacity)),
+            sub_limiter: None,
         }
+    }
+
+    #[cfg(test)]
+    /// Creates a new prover service state for testing with an explicit
+    /// per-(iss, sub) limiter. Used to exercise rate-limit enforcement.
+    pub fn new_for_testing_with_sub_limiter(
+        training_wheels_key_pair: TrainingWheelsKeyPair,
+        prover_service_config: Arc<ProverServiceConfig>,
+        deployment_information: DeploymentInformation,
+        jwk_cache: JWKCache,
+        federated_jwks: FederatedJWKs<FederatedJWKIssuer>,
+        sub_limiter: Option<Arc<SubLimiter>>,
+    ) -> Self {
+        let mut state = Self::new_for_testing(
+            training_wheels_key_pair,
+            prover_service_config,
+            deployment_information,
+            jwk_cache,
+            federated_jwks,
+        );
+        state.sub_limiter = sub_limiter;
+        state
     }
 
     /// Returns a reference to the circuit configuration
@@ -145,6 +176,11 @@ impl ProverServiceState {
     pub fn prove_semaphore(&self) -> Arc<Semaphore> {
         self.prove_semaphore.clone()
     }
+
+    /// Returns the per-(iss, sub) rate limiter, if configured.
+    pub fn sub_limiter(&self) -> Option<&Arc<SubLimiter>> {
+        self.sub_limiter.as_ref()
+    }
 }
 
 /// Read PROVER_MAX_CONCURRENCY from env (default 4).
@@ -154,6 +190,29 @@ fn prove_max_concurrency_from_env() -> usize {
         .and_then(|v| v.parse().ok())
         .filter(|&n: &usize| n > 0)
         .unwrap_or(4)
+}
+
+/// Build a per-(iss, sub) rate limiter from env. Returns `None` when
+/// `PROVER_SUB_RATE_PER_MIN=0` (limit disabled).
+///
+/// `PROVER_SUB_RATE_PER_MIN` (default 30), `PROVER_SUB_RATE_BURST` (default 5).
+fn sub_limiter_from_env() -> Option<Arc<SubLimiter>> {
+    let per_min = std::env::var("PROVER_SUB_RATE_PER_MIN")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30u32);
+    let burst = std::env::var("PROVER_SUB_RATE_BURST")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5u32);
+    match rate_limit::build_sub_limiter(per_min, burst) {
+        Ok(Some(l)) => Some(l),
+        Ok(None) => {
+            warn!("PROVER_SUB_RATE_PER_MIN=0 — per-(iss,sub) rate limit disabled");
+            None
+        }
+        Err(e) => panic!("invalid PROVER_SUB_RATE_*: {e}"),
+    }
 }
 
 /// The training wheels key pair struct
