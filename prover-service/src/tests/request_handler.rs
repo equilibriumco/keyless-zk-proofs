@@ -406,6 +406,59 @@ async fn test_body_size_limit_returns_413() {
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
 
+#[tokio::test]
+async fn test_ip_rate_limit_returns_429_after_burst() {
+    use aptos_keyless_common::rate_limit::{build_ip_limiter, ip_limit_middleware, IpLimitState};
+    use axum::extract::ConnectInfo;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    // Tiny burst (2) so 3rd request must be denied. per-min rate is set
+    // high enough that the test only depends on burst capacity.
+    let ip_state = IpLimitState {
+        limiter: build_ip_limiter(60, 2).unwrap(),
+        trusted_proxies: Arc::new(vec![]),
+    };
+
+    let prover_service_state = Arc::new(ProverServiceState::new_for_testing(
+        TrainingWheelsKeyPair::new_for_testing(),
+        Arc::new(ProverServiceConfig::default()),
+        DeploymentInformation::default(),
+        Arc::new(Mutex::new(HashMap::new())),
+        FederatedJWKs::new_empty(),
+    ));
+    let router: Router = Router::new()
+        .route(handler::PROVE_PATH, post(prover_handler::prove_handler))
+        .with_state(prover_service_state)
+        .layer(axum::middleware::from_fn_with_state(
+            ip_state,
+            ip_limit_middleware,
+        ));
+
+    let mk_request = || {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 7)), 65000);
+        let mut r = Request::builder()
+            .uri(format!("http://127.0.0.1{}", PROVE_PATH))
+            .method(Method::POST)
+            .header("content-type", "application/json")
+            .body(Body::from("{}"))
+            .unwrap();
+        r.extensions_mut().insert(ConnectInfo(addr));
+        r
+    };
+
+    // First two must pass the IP layer (handler may reject with 400, but
+    // crucially not 429).
+    for _ in 0..2 {
+        let resp = router.clone().oneshot(mk_request()).await.unwrap();
+        assert_ne!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    // Third request from the same peer must be denied at the IP layer.
+    let resp = router.oneshot(mk_request()).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(resp.headers().contains_key("retry-after"));
+}
+
 /// Gets the response body as a string
 async fn get_response_body_string(response: Response<Body>) -> String {
     let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)

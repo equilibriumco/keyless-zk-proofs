@@ -2,6 +2,7 @@
 
 use aptos_crypto::ed25519::Ed25519PrivateKey;
 use aptos_crypto::ValidCryptoMaterialStringExt;
+use aptos_keyless_common::rate_limit::{self, ip_limit_middleware, IpLimitState, IpLimiter};
 use aptos_logger::{error, info, warn};
 use axum::extract::{DefaultBodyLimit, Request};
 use axum::http::{HeaderValue, Method};
@@ -125,6 +126,55 @@ fn body_limit_bytes_from_env() -> usize {
         .unwrap_or(64 * 1024)
 }
 
+/// Build the per-IP rate-limit state from env.
+///
+/// `PROVER_IP_RATE_PER_MIN` (default 60) — sustained requests per minute
+/// per IP. Set to 0 to disable IP rate limiting (returns `None`).
+/// `PROVER_IP_RATE_BURST` (default 10) — short-burst capacity.
+/// `PROVER_TRUSTED_PROXY_CIDRS` (default empty) — comma-separated CIDRs
+/// whose `X-Forwarded-For` is trusted for resolving the real client IP.
+/// Empty list → use the peer address (correct when no L7 proxy is in front).
+///
+/// The DashMap-backed limiter retains an entry per observed IP. A
+/// background GC task spawned by the caller runs `retain_recent` every
+/// 10 minutes to bound memory.
+fn ip_rate_limit_from_env() -> Option<(IpLimitState, Arc<IpLimiter>)> {
+    let per_min = std::env::var("PROVER_IP_RATE_PER_MIN")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60u32);
+    let burst = std::env::var("PROVER_IP_RATE_BURST")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10u32);
+
+    let limiter = match rate_limit::build_ip_limiter(per_min, burst) {
+        Ok(Some(l)) => l,
+        Ok(None) => {
+            warn!("PROVER_IP_RATE_PER_MIN=0 — per-IP rate limit disabled");
+            return None;
+        }
+        Err(e) => panic!("invalid PROVER_IP_RATE_*: {e}"),
+    };
+
+    let trusted = rate_limit::parse_trusted_proxies(
+        &std::env::var("PROVER_TRUSTED_PROXY_CIDRS").unwrap_or_default(),
+    )
+    .unwrap_or_else(|e| panic!("invalid PROVER_TRUSTED_PROXY_CIDRS: {e}"));
+    if trusted.is_empty() {
+        warn!(
+            "PROVER_TRUSTED_PROXY_CIDRS is empty — per-IP limit uses peer address. \
+             If deployed behind an L7 proxy, set this to your proxy's CIDR ranges."
+        );
+    }
+
+    let state = IpLimitState {
+        limiter: Some(limiter.clone()),
+        trusted_proxies: Arc::new(trusted),
+    };
+    Some((state, limiter))
+}
+
 /// Build a `CorsLayer` from `PROVER_ALLOWED_ORIGINS` (comma-separated).
 ///
 /// Empty / unset → no CORS headers are emitted; cross-origin browser
@@ -207,7 +257,22 @@ async fn start_prover_service(
         );
     }
 
-    let mut router = Router::new()
+    // Per-IP rate limit applies only to /v0/prove. /healthcheck, /jwks,
+    // /about, /config remain unthrottled — operators and probes shouldn't
+    // share a bucket with a real prove burst.
+    let ip_rate_limit = ip_rate_limit_from_env();
+    if let Some((_, ref limiter)) = ip_rate_limit {
+        info!("Per-IP rate limit enabled on /v0/prove");
+        let limiter_for_gc = limiter.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(600)).await;
+                limiter_for_gc.retain_recent();
+            }
+        });
+    }
+
+    let public_router = Router::new()
         .route(
             handler::ABOUT_PATH,
             get(handler::about_handler).options(handler::options_handler),
@@ -224,12 +289,26 @@ async fn start_prover_service(
             handler::JWK_PATH,
             get(handler::jwk_handler).options(handler::options_handler),
         )
+        .with_state(prover_service_state.clone());
+
+    let prove_router = Router::new()
         .route(
             handler::PROVE_PATH,
             post(prover_handler::prove_handler).options(handler::options_handler),
         )
+        .with_state(prover_service_state);
+    let prove_router = if let Some((ip_state, _)) = ip_rate_limit {
+        prove_router.layer(axum::middleware::from_fn_with_state(
+            ip_state,
+            ip_limit_middleware,
+        ))
+    } else {
+        prove_router
+    };
+
+    let mut router = public_router
+        .merge(prove_router)
         .layer(DefaultBodyLimit::max(body_limit_bytes))
-        .with_state(prover_service_state)
         .layer(axum::middleware::from_fn(metrics_logging_middleware));
 
     if let Some(cors) = cors_layer {
@@ -241,7 +320,14 @@ async fn start_prover_service(
         Ok(listener) => listener,
         Err(error) => panic!("Prover service bind error! Error: {}", error),
     };
-    if let Err(error) = axum::serve(listener, router).await {
+    // ConnectInfo<SocketAddr> is required by ip_limit_middleware to read
+    // the peer address; only into_make_service_with_connect_info inserts it.
+    if let Err(error) = axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    {
         error!("Prover service error! Error: {}", error);
         panic!("Prover service error! Error: {}", error);
     }
