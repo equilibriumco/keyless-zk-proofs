@@ -238,7 +238,7 @@ dependencies = [
  "poseidon-ark",
  "rand 0.7.3",
  "rand_core 0.5.1",
- "ring",
+ "ring 0.16.20",
  "serde",
  "serde-name",
  "serde_bytes",
@@ -464,7 +464,7 @@ dependencies = [
  "hashbrown 0.14.3",
  "hex",
  "itertools 0.13.0",
- "jsonwebtoken",
+ "jsonwebtoken 8.3.0",
  "lru",
  "move-binary-format",
  "move-core-types",
@@ -482,7 +482,7 @@ dependencies = [
  "rand 0.7.3",
  "rayon",
  "ref-cast",
- "ring",
+ "ring 0.16.20",
  "rsa",
  "serde",
  "serde-big-array",
@@ -2205,8 +2205,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "190092ea657667030ac6a35e305e62fc4dd69fd98ac98631e5d3a2b1575a12b5"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi 0.11.0+wasi-snapshot-preview1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -3006,8 +3008,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6971da4d9c3aa03c3d8f3ff0f4155b534aad021292003895a469716b2a230378"
 dependencies = [
  "base64 0.21.7",
- "pem",
- "ring",
+ "pem 1.1.1",
+ "ring 0.16.20",
+ "serde",
+ "serde_json",
+ "simple_asn1",
+]
+
+[[package]]
+name = "jsonwebtoken"
+version = "9.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a87cc7a48537badeae96744432de36f4be2b4a34a05a5ef32e9dd8a1c169dde"
+dependencies = [
+ "base64 0.22.1",
+ "js-sys",
+ "pem 3.0.6",
+ "ring 0.17.14",
  "serde",
  "serde_json",
  "simple_asn1",
@@ -4020,12 +4037,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "pem"
+version = "3.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d30c53c26bc5b31a98cd02d20f25a7c8567146caf63ed593a9d87b2775291be"
+dependencies = [
+ "base64 0.22.1",
+ "serde_core",
+]
+
+[[package]]
 name = "pem-rfc7468"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412"
 dependencies = [
  "base64ct",
+]
+
+[[package]]
+name = "pepper-service"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aptos-keyless-common",
+ "axum",
+ "base64 0.13.1",
+ "hex",
+ "hmac 0.12.1",
+ "jsonwebtoken 9.3.1",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.8",
+ "tempfile",
+ "thiserror 1.0.58",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber 0.3.18",
+ "uuid",
+ "wiremock",
+ "zeroize",
 ]
 
 [[package]]
@@ -4382,7 +4436,7 @@ dependencies = [
  "clap 4.5.51",
  "hex",
  "http 1.1.0",
- "jsonwebtoken",
+ "jsonwebtoken 9.3.1",
  "maplit2",
  "num-bigint 0.4.4",
  "once_cell",
@@ -4757,9 +4811,23 @@ dependencies = [
  "libc",
  "once_cell",
  "spin 0.5.2",
- "untrusted",
+ "untrusted 0.7.1",
  "web-sys",
  "winapi",
+]
+
+[[package]]
+name = "ring"
+version = "0.17.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "getrandom 0.2.12",
+ "libc",
+ "untrusted 0.9.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6012,6 +6080,12 @@ name = "untrusted"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
+
+[[package]]
+name = "untrusted"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "ureq"

@@ -4,6 +4,7 @@ resolver = "2"
 members = [
     "circuit",
     "keyless-common",
+    "pepper-service",
     "prover-service",
     "release-helper",
     "rust-rapidsnark",
@@ -50,11 +51,12 @@ clap = { version = "4.5.51", features = [
 ] }
 governor = "0.7"
 hex = { version = "0.4.3", features = ["serde"] }
+hmac = "0.12"
 http = "1.0.0"
 hyper = { version = "0.14.18", features = ["full"] }
 ipnet = "2"
 itertools = "0.13"
-jsonwebtoken = "8.1"
+jsonwebtoken = "9"
 maplit2 = "1.0.5"
 num-bigint = "0.4.4"
 num-traits = "0.2.17"
@@ -79,6 +81,7 @@ tokio = { version = "1.39", features = ["full"] }
 tower = "0.4.13"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+zeroize = "1"
 tower-http = { version = "0.5.1", features = ["cors", "limit", "request-id", "trace", "util"] }
 ureq = { version = "1.5.4", features = [
     "json",
