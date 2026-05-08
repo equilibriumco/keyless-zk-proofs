@@ -7,6 +7,7 @@ use aptos_keyless_common::input_processing::circuit_config::CircuitConfig;
 use aptos_keyless_common::rate_limit::{self, SubLimiter};
 use aptos_logger::warn;
 use rust_rapidsnark::FullProver;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 
@@ -32,6 +33,11 @@ pub struct ProverServiceState {
     /// signature verification, so an attacker holding a forged JWT cannot
     /// drain a real user's bucket. `None` disables the limit.
     sub_limiter: Option<Arc<SubLimiter>>,
+    /// Allowlist of JWT `aud` values. `None` (env unset/empty) accepts
+    /// any aud — useful for testing. `Some(set)` rejects auds outside
+    /// the set with `ProverServiceError::AudNotAllowed` before any JWK
+    /// fetch is attempted.
+    allowed_auds: Option<Arc<HashSet<String>>>,
 }
 
 impl ProverServiceState {
@@ -51,6 +57,7 @@ impl ProverServiceState {
 
         let max_concurrency = prove_max_concurrency_from_env();
         let sub_limiter = sub_limiter_from_env();
+        let allowed_auds = allowed_auds_from_env();
 
         // Create the prover service state
         ProverServiceState {
@@ -63,6 +70,7 @@ impl ProverServiceState {
             federated_jwks,
             prove_semaphore: Arc::new(Semaphore::new(max_concurrency)),
             sub_limiter,
+            allowed_auds,
         }
     }
 
@@ -112,7 +120,29 @@ impl ProverServiceState {
             federated_jwks,
             prove_semaphore: Arc::new(Semaphore::new(semaphore_capacity)),
             sub_limiter: None,
+            allowed_auds: None,
         }
+    }
+
+    #[cfg(test)]
+    /// Test helper: build state with a specific aud allowlist.
+    pub fn new_for_testing_with_allowed_auds(
+        training_wheels_key_pair: TrainingWheelsKeyPair,
+        prover_service_config: Arc<ProverServiceConfig>,
+        deployment_information: DeploymentInformation,
+        jwk_cache: JWKCache,
+        federated_jwks: FederatedJWKs<FederatedJWKIssuer>,
+        allowed_auds: Option<Arc<HashSet<String>>>,
+    ) -> Self {
+        let mut state = Self::new_for_testing(
+            training_wheels_key_pair,
+            prover_service_config,
+            deployment_information,
+            jwk_cache,
+            federated_jwks,
+        );
+        state.allowed_auds = allowed_auds;
+        state
     }
 
     #[cfg(test)]
@@ -181,6 +211,11 @@ impl ProverServiceState {
     pub fn sub_limiter(&self) -> Option<&Arc<SubLimiter>> {
         self.sub_limiter.as_ref()
     }
+
+    /// Returns the JWT `aud` allowlist, if configured. `None` accepts any aud.
+    pub fn allowed_auds(&self) -> Option<&Arc<HashSet<String>>> {
+        self.allowed_auds.as_ref()
+    }
 }
 
 /// Read PROVER_MAX_CONCURRENCY from env (default 4).
@@ -190,6 +225,26 @@ fn prove_max_concurrency_from_env() -> usize {
         .and_then(|v| v.parse().ok())
         .filter(|&n: &usize| n > 0)
         .unwrap_or(4)
+}
+
+/// Read `PROVER_ALLOWED_AUDS` (comma-separated) and return the allow
+/// set. Empty / unset → `None` (any aud accepted; useful for testing).
+fn allowed_auds_from_env() -> Option<Arc<HashSet<String>>> {
+    let raw = std::env::var("PROVER_ALLOWED_AUDS").ok()?;
+    let set: HashSet<String> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect();
+    if set.is_empty() {
+        warn!(
+            "PROVER_ALLOWED_AUDS set but parsed to an empty list — \
+             treating as unset (any aud will be accepted)"
+        );
+        return None;
+    }
+    Some(Arc::new(set))
 }
 
 /// Build a per-(iss, sub) rate limiter from env. Returns `None` when

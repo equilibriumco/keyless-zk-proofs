@@ -80,6 +80,15 @@ pub fn generate_too_many_requests_response(origin: String) -> Response<Body> {
     )
 }
 
+/// Generates a 403 response for requests whose JWT `aud` is not allowed.
+pub fn generate_forbidden_response(origin: String) -> Response<Body> {
+    generate_json_response(
+        origin,
+        StatusCode::FORBIDDEN,
+        r#"{"error":"aud not allowed"}"#.to_string(),
+    )
+}
+
 /// Generates a JSON response with the given status code and body string
 pub fn generate_json_response(
     origin: String,

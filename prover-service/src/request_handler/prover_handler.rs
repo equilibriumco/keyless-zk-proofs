@@ -111,6 +111,13 @@ async fn handle_prove_request_inner(
                 );
                 return handler::generate_too_many_requests_response(origin);
             }
+            Err(ProverServiceError::AudNotAllowed) => {
+                warn!(
+                    "/v0/prove rejected: JWT aud not in PROVER_ALLOWED_AUDS; origin={}",
+                    origin
+                );
+                return handler::generate_forbidden_response(origin);
+            }
             Err(error) => {
                 let error_string =
                     format!("Failed to validate prove request input! Error: {}", error);

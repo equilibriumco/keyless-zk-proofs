@@ -19,6 +19,11 @@ pub enum ProverServiceError {
     /// targeted user.
     #[error("Per-user rate limit exceeded")]
     SubRateLimited,
+    /// The JWT's `aud` is not in the configured `PROVER_ALLOWED_AUDS`.
+    /// Returned before any JWK fetch so probing for unknown auds doesn't
+    /// burn a network round-trip.
+    #[error("aud not allowed")]
+    AudNotAllowed,
 }
 
 impl From<anyhow::Error> for ProverServiceError {

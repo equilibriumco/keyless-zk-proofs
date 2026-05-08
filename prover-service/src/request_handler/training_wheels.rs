@@ -92,6 +92,12 @@ pub async fn preprocess_and_validate_request(
 ) -> Result<VerifiedInput, ProverServiceError> {
     // Get the decoded JWT and the JWK
     let jwt = DecodedJWT::from_b64(&request_input.jwt_b64).map_err(to_bad_request)?;
+
+    // Reject disallowed `aud` BEFORE the JWK fetch — saves a network
+    // round-trip on rejected audiences and prevents using this
+    // endpoint to amplify traffic to upstream JWK URLs.
+    check_aud_allowlist(prover_service_state, &jwt.payload.aud)?;
+
     let prover_service_config = prover_service_state.prover_service_config();
     let jwk = get_jwk(&prover_service_config, &jwt, jwk_cache, federated_jwks)
         .await
@@ -114,6 +120,22 @@ pub async fn preprocess_and_validate_request(
 
 fn to_bad_request(e: anyhow::Error) -> ProverServiceError {
     ProverServiceError::BadRequest(e.to_string())
+}
+
+/// Rejects JWTs whose `aud` is not in the configured allowlist. Returns
+/// `Ok(())` when no allowlist is set (testing).
+pub fn check_aud_allowlist(
+    prover_service_state: &ProverServiceState,
+    aud: &str,
+) -> Result<(), ProverServiceError> {
+    let Some(allow) = prover_service_state.allowed_auds() else {
+        return Ok(());
+    };
+    if allow.contains(aud) {
+        Ok(())
+    } else {
+        Err(ProverServiceError::AudNotAllowed)
+    }
 }
 
 /// Charges the per-(iss, sub) rate-limit bucket for a JWT whose

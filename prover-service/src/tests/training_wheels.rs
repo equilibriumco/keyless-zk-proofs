@@ -11,7 +11,7 @@ use crate::tests::types::{ProofTestCase, TestJWTPayload};
 use crate::tests::utils;
 use aptos_infallible::Mutex;
 use aptos_keyless_common::rate_limit::build_sub_limiter;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -93,6 +93,46 @@ fn test_sub_rate_limit_denies_after_burst() {
     assert!(
         training_wheels::check_sub_rate_limit(&state, "https://appleid.apple.com", sub).is_ok()
     );
+}
+
+#[test]
+fn test_aud_allowlist_accepts_listed_and_rejects_others() {
+    let mut allowed = HashSet::new();
+    allowed.insert("good-aud".to_string());
+    allowed.insert("also-good-aud".to_string());
+    let state = Arc::new(ProverServiceState::new_for_testing_with_allowed_auds(
+        TrainingWheelsKeyPair::new_for_testing(),
+        Arc::new(ProverServiceConfig::default()),
+        DeploymentInformation::default(),
+        Arc::new(Mutex::new(HashMap::new())),
+        FederatedJWKs::new_empty(),
+        Some(Arc::new(allowed)),
+    ));
+
+    assert!(training_wheels::check_aud_allowlist(&state, "good-aud").is_ok());
+    assert!(training_wheels::check_aud_allowlist(&state, "also-good-aud").is_ok());
+    match training_wheels::check_aud_allowlist(&state, "unknown-aud") {
+        Err(ProverServiceError::AudNotAllowed) => {}
+        other => panic!("expected AudNotAllowed, got {other:?}"),
+    }
+    // Empty string is not implicitly allowed.
+    match training_wheels::check_aud_allowlist(&state, "") {
+        Err(ProverServiceError::AudNotAllowed) => {}
+        other => panic!("expected AudNotAllowed for empty aud, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_aud_allowlist_unset_accepts_any() {
+    let state = Arc::new(ProverServiceState::new_for_testing(
+        TrainingWheelsKeyPair::new_for_testing(),
+        Arc::new(ProverServiceConfig::default()),
+        DeploymentInformation::default(),
+        Arc::new(Mutex::new(HashMap::new())),
+        FederatedJWKs::new_empty(),
+    ));
+    assert!(training_wheels::check_aud_allowlist(&state, "anything").is_ok());
+    assert!(training_wheels::check_aud_allowlist(&state, "").is_ok());
 }
 
 #[test]
