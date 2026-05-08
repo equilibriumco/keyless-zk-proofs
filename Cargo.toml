@@ -48,9 +48,11 @@ clap = { version = "4.5.51", features = [
     "unstable-styles",
     "wrap_help",
 ] }
+governor = "0.7"
 hex = { version = "0.4.3", features = ["serde"] }
 http = "1.0.0"
 hyper = { version = "0.14.18", features = ["full"] }
+ipnet = "2"
 itertools = "0.13"
 jsonwebtoken = "8.1"
 maplit2 = "1.0.5"
