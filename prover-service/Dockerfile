@@ -14,9 +14,13 @@ RUN ./scripts/task.sh prover-service install-deps
 RUN /root/.cargo/bin/cargo build --release -p prover-service \
  && cp target/release/prover-service /prover-service-bin
 
-# Download trusted setup and witness gen binaries
+# Download trusted setup and witness gen binaries.
+# circuit-v4.0.0 is what Movement testnet's on-chain VK matches as of
+# 2026-05-08; do NOT swap to v1.0.1 / v1.2.0 without verifying the
+# on-chain VK first (proofs minted against a mismatched zkey verify
+# locally but are rejected by the chain).
 ENV RESOURCES_DIR=/resources
-RUN ./scripts/task.sh setup download-ceremonies-for-releases --witness-gen-type c circuit-v1.0.1
+RUN ./scripts/task.sh setup download-ceremonies-for-releases --witness-gen-type c circuit-v4.0.0
 
 # The image that is actually deployed
 FROM debian:bookworm

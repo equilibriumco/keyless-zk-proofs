@@ -65,12 +65,15 @@ comments in `docker-compose.yml` and `pepper-service/Dockerfile`.
 
 ## Trusted setup artifacts
 
-The prover-service Docker build downloads the upstream `circuit-v1.0.1`
+The prover-service Docker build downloads the upstream `circuit-v4.0.0`
 ceremony artifacts. Movement testnet's on-chain VK matches that
-ceremony, so v1.0.1 artifacts produce on-chain-verifiable proofs. Do
-NOT swap in `circuit-v1.2.0` or `circuit-v4.0.0` artifacts without first
-confirming the on-chain VK matches that ceremony — proofs minted
-against a mismatched zkey verify locally but are rejected by the chain.
+ceremony as of 2026-05-08, so v4.0.0 artifacts produce on-chain-
+verifiable proofs. Do NOT swap in `circuit-v1.0.1` or `circuit-v1.2.0`
+artifacts without first confirming the on-chain VK matches that
+ceremony — proofs minted against a mismatched zkey verify locally but
+are rejected by the chain. (Each Groth16 ceremony embeds its own
+trusted-setup randomness; the curve points agree across ceremonies but
+`delta_g2` and `gamma_abc_g1` do not.)
 
 ## Upstream sync
 
