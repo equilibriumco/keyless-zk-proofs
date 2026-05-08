@@ -7,10 +7,15 @@
 //! actually signed for a real user.
 //!
 //! The verifier:
-//! 1. looks up the JWK modulus for the JWT header's `kid` via the shared
-//!    `JwkCache` — cached, TTL-driven, same mechanism as the prover;
-//! 2. decodes and verifies the RS256 signature using `jsonwebtoken`;
-//! 3. checks that the JWT's `iss` is in the configured allowlist;
+//! 1. checks that the JWT's `iss` is in the configured allowlist —
+//!    BEFORE any JWK lookup, so a forged JWT pointing at a foreign
+//!    issuer cannot turn pepper-service into a JWKS-fetch amplifier
+//!    against arbitrary upstreams;
+//! 2. looks up the JWK modulus for the JWT header's `kid` via the
+//!    shared `JwkCache` — cached, TTL-driven, same mechanism as the
+//!    prover;
+//! 3. decodes and verifies the RS256 signature using `jsonwebtoken`
+//!    (which also re-asserts the `iss` allowlist as defence in depth);
 //! 4. checks the JWT's `exp` hasn't passed.
 //!
 //! The `aud` claim is explicitly NOT checked here — that's the prover's
@@ -64,6 +69,20 @@ pub async fn verify_jwt(
         return Err(VerifyJwtError::BadJwt(anyhow!(
             "unsupported JWT alg {:?}; only RS256 is accepted",
             parsed.header.alg
+        )));
+    }
+
+    // Apply the issuer allowlist BEFORE the JWK lookup so a forged JWT
+    // for a disallowed `iss` (or with a random `kid` at a real issuer)
+    // cannot trigger an upstream JWKS fetch. Without this short-circuit,
+    // every disallowed-iss request would still hit the JwkCache, which
+    // on a cache miss issues a network request — turning pepper-service
+    // into a configurable JWKS-fetch amplifier for any URL the operator
+    // has registered.
+    if !allowed_iss.is_empty() && !allowed_iss.contains(&parsed.payload.iss) {
+        return Err(VerifyJwtError::BadJwt(anyhow!(
+            "iss {:?} not in allowlist",
+            parsed.payload.iss
         )));
     }
 

@@ -3,8 +3,9 @@
 #   docker compose up --build
 #
 # prover-service listens on :8080 (mapped to host :8080).
-# pepper-service is reachable only on the internal compose network at
-# http://pepper-service:3002 (no host port exposed).
+# pepper-service listens on :3002 (mapped to host :3002 so the wallet
+# can call it directly); inside the compose network it's reachable as
+# http://pepper-service:3002 .
 #
 # Prerequisites (see README-movement.md for full setup):
 #   1. ./secrets/pepper        — pepper HMAC key (raw bytes, ≥ 32). Generate:

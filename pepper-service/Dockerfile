@@ -1,7 +1,11 @@
 # syntax=docker/dockerfile:1
 
 # --- builder ------------------------------------------------------------------
-FROM rust:1.95-slim-bookworm AS builder
+# Match the toolchain pinned in rust-toolchain.toml so the image is built
+# with the same rustc as `cargo build` from a host checkout. Bumping
+# rust-toolchain.toml without bumping this tag (or vice versa) silently
+# rebuilds against a different toolchain.
+FROM rust:1.89-slim-bookworm AS builder
 
 # keyless-common::JwkCache pulls reqwest → openssl-sys, which needs
 # pkg-config + libssl-dev at build time.

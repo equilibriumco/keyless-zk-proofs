@@ -272,6 +272,21 @@ async fn start_prover_service(
         });
     }
 
+    // Mirror the IP-limiter GC for the per-(iss, sub) limiter built in
+    // `ProverServiceState`: governor's DashMap-backed keyed limiter
+    // accumulates one entry per observed (iss, sub) and never evicts
+    // them on its own, so without `retain_recent` the bucket map grows
+    // monotonically for the lifetime of the process.
+    if let Some(sub_limiter) = prover_service_state.sub_limiter().cloned() {
+        info!("Per-(iss, sub) rate limit enabled on /v0/prove");
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(600)).await;
+                sub_limiter.retain_recent();
+            }
+        });
+    }
+
     let public_router = Router::new()
         .route(
             handler::ABOUT_PATH,

@@ -67,16 +67,21 @@ const JWK_MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 /// the recommended next-refresh duration, clamped to
 /// `[JWK_MIN_REFRESH_INTERVAL, JWK_MAX_REFRESH_INTERVAL]`.
 ///
-/// Returns `None` when the response advertises `no-store`, `no-cache`,
-/// `must-revalidate`, or has no usable `max-age`.
+/// Returns `None` when the response advertises `no-store` or `no-cache`,
+/// or has no usable `max-age`. `must-revalidate` is intentionally NOT
+/// treated as a cache-bypass directive — per RFC 9111 §5.2.2.2 it only
+/// constrains the use of stale responses; `public, max-age=3600,
+/// must-revalidate` is a perfectly normal combination meaning "cache
+/// for 3600s, then revalidate before reusing." Treating it as
+/// `no-cache` makes us fall through to the 10s default refresh and
+/// hammer the upstream JWKS endpoint.
 fn parse_cache_control_max_age(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     let value = headers.get(reqwest::header::CACHE_CONTROL)?.to_str().ok()?;
 
     // Honor "do not cache" directives — fall through to the configured
     // refresh rate.
     let lower = value.to_ascii_lowercase();
-    if lower.contains("no-store") || lower.contains("no-cache") || lower.contains("must-revalidate")
-    {
+    if lower.contains("no-store") || lower.contains("no-cache") {
         return None;
     }
 
@@ -348,10 +353,15 @@ mod cache_control_tests {
     }
 
     #[test]
-    fn parses_typical_max_age() {
+    fn parses_typical_max_age_with_must_revalidate() {
+        // RFC 9111 §5.2.2.2: `must-revalidate` constrains use of stale
+        // responses, NOT initial caching. `public, max-age=3600,
+        // must-revalidate` should still cache for 3600s.
         let h = headers_with("public, max-age=3600, must-revalidate");
-        // `must-revalidate` short-circuits caching even if max-age is present
-        assert_eq!(parse_cache_control_max_age(&h), None);
+        assert_eq!(
+            parse_cache_control_max_age(&h),
+            Some(Duration::from_secs(3600))
+        );
     }
 
     #[test]

@@ -2,10 +2,11 @@ use serde::{Deserialize, Serialize};
 
 /// Request body for `POST /pepper`.
 ///
-/// The prover (or any client) passes the full JWT here. Today we only decode
-/// it to extract `sub` and `aud`; a hardened version must also verify the
-/// JWT's RSA signature against the issuer's JWKs and enforce `iss` /
-/// `exp` / `iat` policy before returning a pepper.
+/// The wallet (or any client) passes the full JWT here. The handler
+/// verifies the JWT's RSA signature against the issuer's JWKs and enforces
+/// `iss` / `exp` policy via `verify::verify_jwt` before deriving the
+/// pepper from `(sub, aud)` — see `pepper-service/src/verify.rs` and
+/// the call site in `pepper-service/src/api.rs::pepper`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PepperRequest {
     pub jwt: String,

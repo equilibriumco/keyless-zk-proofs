@@ -116,10 +116,14 @@ async fn main() {
         ))
         .layer(DefaultBodyLimit::max(body_limit_bytes));
 
-    // No CORS layer — pepper-service is internal-only (the prover talks to
-    // it server-to-server over the docker-compose network; no host port
-    // mapping). Cross-origin browser callers shouldn't be reaching this
-    // service in the first place.
+    // No CORS layer — under the upstream Aptos two-service flow the
+    // wallet hits pepper-service directly from the browser, but
+    // chrome-extension:// origins ignore CORS anyway, and any other
+    // browser-origin caller is rejected by same-origin policy without
+    // the server having to lift a finger. If a future deployment puts
+    // a regular SPA on a known origin in front of pepper-service, add
+    // a tower-http CorsLayer here mirroring the prover's
+    // PROVER_ALLOWED_ORIGINS pattern.
     let (set_request_id, propagate_request_id) = request_id_layers(MakeRequestUuid);
     let app = Router::new()
         .route("/health", routing::get(api::health))

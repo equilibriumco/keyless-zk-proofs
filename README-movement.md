@@ -31,9 +31,8 @@ docker compose up --build
 ```
 
 Once running:
-- prover-service: `http://localhost:8080` (POST `/v0/prove`, GET `/healthcheck`, `/jwks`, `/about`, `/config`)
-- pepper-service: only reachable on the internal compose network at
-  `http://pepper-service:3002` (the prover talks to it; no host port).
+- prover-service: `http://localhost:8080` (POST `/v0/prove`, GET `/healthcheck`, `/cached/jwk`, `/about`, `/config`)
+- pepper-service: `http://localhost:3002` on the host (`POST /pepper`, `GET /health`); also reachable inside the compose network as `http://pepper-service:3002`.
 
 To configure the prover for a specific Movement network, set the
 `PROVER_*` env vars in `docker-compose.yml` (see the table below).
