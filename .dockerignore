@@ -3,3 +3,10 @@ formatted_input.json
 .github/
 .idea/
 .git/
+# scripts/task.sh creates a host-local Python venv at .venv. Its bin/
+# scripts have host-absolute shebangs, so copying it into a Linux
+# container breaks pip3 with exit 127. The script recreates the venv
+# inside the image when it's missing.
+/.venv
+# Local secrets are bind-mounted at runtime, not baked into images.
+/secrets
