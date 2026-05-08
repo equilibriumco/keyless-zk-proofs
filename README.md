@@ -1,5 +1,15 @@
 # Keyless ZK Circuit and ZK Proving Service
 
+> **Movement fork.** This is `movementlabsxyz/keyless-zk-proofs`'s
+> `movement-main` branch. For Movement-specific quick-start
+> (`docker compose up`), env knobs (rate limits, aud allowlist,
+> trusted-proxy CIDRs, etc.), the circuit-version pin, and notes on
+> staying in sync with upstream, see **[README-movement.md](README-movement.md)**.
+> The text below describes the upstream Aptos repo and its
+> protocol-level / algorithm docs — its setup steps refer to scripts
+> and ports the Movement fork's docker-compose layer doesn't use, so
+> follow `README-movement.md` for actually running the stack.
+
 This repo contains:
 1. The `circom` implementation of the Aptos Keyless ZK relation from AIP-61 in `circuit/templates/`.
 2. An implementation of a ZK proving service in `prover-service/`.
