@@ -350,7 +350,10 @@ dependencies = [
  "thiserror 1.0.58",
  "tokio",
  "tower",
+ "tower-http",
  "tracing",
+ "tracing-subscriber 0.3.18",
+ "uuid",
  "wiremock",
 ]
 
@@ -5749,8 +5752,11 @@ dependencies = [
  "http-body 1.0.0",
  "http-body-util",
  "pin-project-lite",
+ "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

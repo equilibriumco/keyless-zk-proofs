@@ -79,7 +79,7 @@ tokio = { version = "1.39", features = ["full"] }
 tower = "0.4.13"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-tower-http = { version = "0.5.1", features = ["cors"] }
+tower-http = { version = "0.5.1", features = ["cors", "limit", "request-id", "trace", "util"] }
 ureq = { version = "1.5.4", features = [
     "json",
     "native-tls",
