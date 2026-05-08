@@ -13,16 +13,11 @@ WORKDIR /build
 
 # Compile only the pepper-service binary from the workspace. We copy the
 # whole workspace (not just pepper-service/) because Cargo needs the
-# workspace root Cargo.toml + the sibling crates declared in
-# `workspace.members` to resolve paths and produce a consistent Cargo.lock.
-COPY Cargo.toml Cargo.lock ./
-COPY keyless-common ./keyless-common
-COPY pepper-service ./pepper-service
-COPY poseidon-circomlib ./poseidon-circomlib
-COPY prover ./prover
-COPY rust-rapidsnark ./rust-rapidsnark
+# workspace root Cargo.toml + every crate declared in `workspace.members`
+# to resolve paths and produce a consistent Cargo.lock.
+COPY --link . .
 
-RUN cargo build --release -p movement-keyless-pepper-service
+RUN cargo build --release -p pepper-service
 
 # --- runtime ------------------------------------------------------------------
 FROM debian:bookworm-slim
@@ -39,7 +34,7 @@ RUN useradd --system --uid 10001 --home-dir /app --shell /usr/sbin/nologin peppe
   && chown pepper:pepper /app
 
 WORKDIR /app
-COPY --from=builder /build/target/release/movement-keyless-pepper-service /usr/local/bin/pepper-service
+COPY --from=builder /build/target/release/pepper-service /usr/local/bin/pepper-service
 
 USER pepper
 

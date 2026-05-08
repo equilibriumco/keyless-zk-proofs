@@ -1,0 +1,76 @@
+# Run the prover-service + pepper-service together for local testing.
+#
+#   docker compose up --build
+#
+# prover-service listens on :8080 (mapped to host :8080).
+# pepper-service is reachable only on the internal compose network at
+# http://pepper-service:3002 (no host port exposed).
+#
+# Prerequisites (see README-movement.md for full setup):
+#   1. ./secrets/pepper        — pepper HMAC key (raw bytes, ≥ 32). Generate:
+#         mkdir -p secrets && openssl rand 32 > secrets/pepper && chmod 644 secrets/pepper
+#   2. ./secrets/training_wheels — hex-encoded ed25519 private key for
+#      the prover's training-wheels signature. Generate:
+#         openssl rand -hex 32 > secrets/training_wheels && chmod 644 secrets/training_wheels
+#
+# Both files must be world-readable for the unprivileged uid inside the
+# containers to read them. This is fine for dev/compose; in production
+# inject via the orchestration-native secret mechanism (k8s Secret,
+# Docker Swarm secret, Vault) which handles uid/perms correctly.
+
+services:
+  pepper-service:
+    build:
+      context: .
+      dockerfile: pepper-service/Dockerfile
+    image: keyless-pepper-service:dev
+    restart: unless-stopped
+    environment:
+      # PEPPER_SECRET_FILE takes priority over PEPPER_SECRET — the
+      # container reads the raw bytes from /run/secrets/pepper at startup.
+      PEPPER_SECRET_FILE: /run/secrets/pepper
+      # Observability:
+      #   LOG_FORMAT: json    # one-JSON-line-per-event stdout
+      #   RUST_LOG: debug
+      # Rate limiting (0 disables the dimension):
+      #   PEPPER_RL_IP_PER_MIN: 30
+      #   PEPPER_RL_IP_BURST: 10
+      #   PEPPER_RL_SUB_PER_MIN: 10
+      #   PEPPER_RL_SUB_BURST: 5
+      # Body size cap:
+      #   PEPPER_BODY_LIMIT_BYTES: 8192
+      # Trust X-Forwarded-For from these CIDRs (empty = peer IP only):
+      #   PEPPER_TRUSTED_PROXY_CIDRS: 10.0.0.0/8
+    volumes:
+      - ./secrets/pepper:/run/secrets/pepper:ro
+    # No port mapping on purpose: only the prover talks to pepper-service.
+
+  prover-service:
+    build:
+      context: .
+      dockerfile: prover-service/Dockerfile
+    image: keyless-prover-service:dev
+    restart: unless-stopped
+    depends_on:
+      - pepper-service
+    environment:
+      # Hardening knobs (defaults are sane; uncomment to override).
+      # See README-movement.md for the full list and meanings.
+      #
+      # PROVER_BODY_LIMIT_BYTES: 65536
+      # PROVER_MAX_CONCURRENCY: 4
+      # PROVER_IP_RATE_PER_MIN: 60   # 0 disables
+      # PROVER_IP_RATE_BURST: 10
+      # PROVER_SUB_RATE_PER_MIN: 30  # 0 disables
+      # PROVER_SUB_RATE_BURST: 5
+      # PROVER_TRUSTED_PROXY_CIDRS: 10.0.0.0/8
+      # PROVER_ALLOWED_AUDS: aud-1,aud-2
+      # PROVER_ALLOWED_ORIGINS: https://wallet.example.com
+    command:
+      - ./prover-service-bin
+      - --config-file-path=/config.yml
+      - --training-wheels-private-key-file-path=/run/secrets/training_wheels
+    volumes:
+      - ./secrets/training_wheels:/run/secrets/training_wheels:ro
+    ports:
+      - "8080:8080"
