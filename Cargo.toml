@@ -21,17 +21,17 @@ rust-version = "1.85.0"
 
 [workspace.dependencies]
 anyhow = "1.0.98"
-aptos-build-info = { git = "https://github.com/aptos-labs/aptos-core", rev = "0ce3ac3a3e51c57b7e02ca8ed9010f6eda67d627" }
-aptos-crypto = { git = "https://github.com/aptos-labs/aptos-core", branch = "main" } # TODO: pin to a specific rev
-aptos-crypto-derive = { git = "https://github.com/aptos-labs/aptos-core", rev = "0ce3ac3a3e51c57b7e02ca8ed9010f6eda67d627" }
-aptos-infallible = { git = "https://github.com/aptos-labs/aptos-core", rev = "0ce3ac3a3e51c57b7e02ca8ed9010f6eda67d627" }
+aptos-build-info = { git = "https://github.com/movementlabsxyz/aptos-core", branch = "m1" }
+aptos-crypto = { git = "https://github.com/movementlabsxyz/aptos-core", branch = "m1" }
+aptos-crypto-derive = { git = "https://github.com/movementlabsxyz/aptos-core", branch = "m1" }
+aptos-infallible = { git = "https://github.com/movementlabsxyz/aptos-core", branch = "m1" }
 aptos-keyless-common = { path = "keyless-common" }
-aptos-logger = { git = "https://github.com/aptos-labs/aptos-core", rev = "0ce3ac3a3e51c57b7e02ca8ed9010f6eda67d627" }
-aptos-metrics-core = { git = "https://github.com/aptos-labs/aptos-core", rev = "0ce3ac3a3e51c57b7e02ca8ed9010f6eda67d627" }
-aptos-time-service = { git = "https://github.com/aptos-labs/aptos-core", rev = "0ce3ac3a3e51c57b7e02ca8ed9010f6eda67d627", features = [
+aptos-logger = { git = "https://github.com/movementlabsxyz/aptos-core", branch = "m1" }
+aptos-metrics-core = { git = "https://github.com/movementlabsxyz/aptos-core", branch = "m1" }
+aptos-time-service = { git = "https://github.com/movementlabsxyz/aptos-core", branch = "m1", features = [
     "async",
 ] }
-aptos-types = { git = "https://github.com/aptos-labs/aptos-core", branch = "main" } # TODO: pin to a specific rev
+aptos-types = { git = "https://github.com/movementlabsxyz/aptos-core", branch = "m1" }
 ark-bn254 = "0.4.0"
 ark-ff = "0.4.0"
 ark-groth16 = "0.4.0"
@@ -71,7 +71,7 @@ shellexpand = "3.1.0"
 strum_macros = "0.24"
 tempfile = "3.23.0"
 thiserror = "1.0.57"
-tokio = { version = "1.35.1", features = ["full"] }
+tokio = { version = "1.39", features = ["full"] }
 tower = "0.4.13"
 tower-http = { version = "0.5.1", features = ["cors"] }
 ureq = { version = "1.5.4", features = [
