@@ -39,6 +39,24 @@ pub async fn prove_handler(
     body: Bytes,
 ) -> Response<Body> {
     let origin = handler::get_request_origin(&headers);
+
+    // Cap simultaneous proof generations. Over-cap returns 503 immediately
+    // rather than queueing — proof generation is CPU-heavy and a queue
+    // under load just translates to head-of-line latency for everyone.
+    let _permit = match prover_service_state.prove_semaphore().try_acquire_owned() {
+        Ok(p) => p,
+        Err(_) => {
+            warn!(
+                "/v0/prove rejected (over PROVER_MAX_CONCURRENCY); origin={}",
+                origin
+            );
+            return Response::builder()
+                .status(StatusCode::SERVICE_UNAVAILABLE)
+                .body(Body::from("prover at capacity"))
+                .expect("Failed to build 503 response!");
+        }
+    };
+
     handle_prove_request(origin, body, prover_service_state).await
 }
 

@@ -341,6 +341,40 @@ async fn test_prove_request_bad_request() {
 }
 
 #[tokio::test]
+async fn test_prove_semaphore_returns_503_when_at_capacity() {
+    use crate::request_handler::prover_handler;
+
+    // State with semaphore capacity = 1.
+    let state = Arc::new(ProverServiceState::new_for_testing_with_semaphore_capacity(
+        TrainingWheelsKeyPair::new_for_testing(),
+        Arc::new(ProverServiceConfig::default()),
+        DeploymentInformation::default(),
+        Arc::new(Mutex::new(HashMap::new())),
+        FederatedJWKs::new_empty(),
+        1,
+    ));
+
+    let router: Router = Router::new()
+        .route(handler::PROVE_PATH, post(prover_handler::prove_handler))
+        .with_state(state.clone());
+
+    // Hold the only permit externally to force the next request over capacity.
+    let _permit = state
+        .prove_semaphore()
+        .try_acquire_owned()
+        .expect("semaphore must have a free permit on test setup");
+
+    let request = Request::builder()
+        .uri(format!("http://127.0.0.1{}", PROVE_PATH))
+        .method(Method::POST)
+        .header("content-type", "application/json")
+        .body(Body::from("{}"))
+        .unwrap();
+    let response = router.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
 async fn test_body_size_limit_returns_413() {
     use axum::extract::DefaultBodyLimit;
 

@@ -6,7 +6,7 @@ use aptos_crypto::ed25519::{Ed25519PrivateKey, Ed25519PublicKey};
 use aptos_keyless_common::input_processing::circuit_config::CircuitConfig;
 use rust_rapidsnark::FullProver;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 
 use crate::external_resources::jwk_types::{FederatedJWKIssuer, FederatedJWKs, JWKCache};
 #[cfg(test)]
@@ -21,6 +21,11 @@ pub struct ProverServiceState {
     full_prover: Arc<Mutex<Option<FullProver>>>,
     jwk_cache: JWKCache,
     federated_jwks: FederatedJWKs<FederatedJWKIssuer>,
+    /// Caps simultaneous proof generations. Configured via
+    /// `PROVER_MAX_CONCURRENCY` (default 4). Over-cap returns 503 instead
+    /// of queuing — proof generation is CPU-heavy and a queue under load
+    /// just translates to head-of-line latency for everyone.
+    prove_semaphore: Arc<Semaphore>,
 }
 
 impl ProverServiceState {
@@ -38,6 +43,8 @@ impl ProverServiceState {
         let full_prover = FullProver::new(&prover_service_config.zkey_file_path())
             .expect("Failed to create the full prover!");
 
+        let max_concurrency = prove_max_concurrency_from_env();
+
         // Create the prover service state
         ProverServiceState {
             prover_service_config,
@@ -47,6 +54,7 @@ impl ProverServiceState {
             full_prover: Arc::new(Mutex::new(Some(full_prover))),
             jwk_cache,
             federated_jwks,
+            prove_semaphore: Arc::new(Semaphore::new(max_concurrency)),
         }
     }
 
@@ -59,13 +67,30 @@ impl ProverServiceState {
         jwk_cache: JWKCache,
         federated_jwks: FederatedJWKs<FederatedJWKIssuer>,
     ) -> Self {
-        // Create a circuit configuration for testing
-        let circuit_configuration = CircuitConfig::new();
+        Self::new_for_testing_with_semaphore_capacity(
+            training_wheels_key_pair,
+            prover_service_config,
+            deployment_information,
+            jwk_cache,
+            federated_jwks,
+            usize::MAX >> 1,
+        )
+    }
 
-        // Don't initialize any full prover for testing
+    #[cfg(test)]
+    /// Creates a new prover service state for testing with an explicit
+    /// prove-semaphore capacity.
+    pub fn new_for_testing_with_semaphore_capacity(
+        training_wheels_key_pair: TrainingWheelsKeyPair,
+        prover_service_config: Arc<ProverServiceConfig>,
+        deployment_information: DeploymentInformation,
+        jwk_cache: JWKCache,
+        federated_jwks: FederatedJWKs<FederatedJWKIssuer>,
+        semaphore_capacity: usize,
+    ) -> Self {
+        let circuit_configuration = CircuitConfig::new();
         let full_prover = Arc::new(Mutex::new(None));
 
-        // Create the prover service state
         ProverServiceState {
             prover_service_config,
             circuit_config: circuit_configuration,
@@ -74,6 +99,7 @@ impl ProverServiceState {
             full_prover,
             jwk_cache,
             federated_jwks,
+            prove_semaphore: Arc::new(Semaphore::new(semaphore_capacity)),
         }
     }
 
@@ -111,6 +137,20 @@ impl ProverServiceState {
     pub fn training_wheels_key_pair(&self) -> &TrainingWheelsKeyPair {
         &self.training_wheels_key_pair
     }
+
+    /// Returns a clone of the prove-concurrency semaphore.
+    pub fn prove_semaphore(&self) -> Arc<Semaphore> {
+        self.prove_semaphore.clone()
+    }
+}
+
+/// Read PROVER_MAX_CONCURRENCY from env (default 4).
+fn prove_max_concurrency_from_env() -> usize {
+    std::env::var("PROVER_MAX_CONCURRENCY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&n: &usize| n > 0)
+        .unwrap_or(4)
 }
 
 /// The training wheels key pair struct
