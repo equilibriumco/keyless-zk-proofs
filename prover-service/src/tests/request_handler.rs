@@ -7,24 +7,35 @@ use crate::request_handler::handler;
 use crate::request_handler::handler::{
     ABOUT_PATH, CONFIG_PATH, HEALTH_CHECK_PATH, JWK_PATH, PROVE_PATH,
 };
+use crate::request_handler::prover_handler;
 use crate::request_handler::prover_state::{ProverServiceState, TrainingWheelsKeyPair};
 use aptos_infallible::Mutex;
 use aptos_types::jwks::rsa::SECURE_TEST_RSA_JWK;
-use hyper::{
-    header::{
-        ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
-    },
-    Body, Method, Request, Response, StatusCode,
+use axum::body::Body;
+use axum::http::header::{
+    ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
+    ACCESS_CONTROL_ALLOW_ORIGIN,
 };
-use reqwest::header::ACCESS_CONTROL_ALLOW_CREDENTIALS;
+use axum::http::{Method, Request, Response, StatusCode};
+use axum::routing::{get, post};
+use axum::Router;
 use std::ops::Deref;
 use std::{collections::HashMap, sync::Arc};
+use tower::ServiceExt;
 
 #[tokio::test]
 async fn test_options_request() {
-    // Send an options request to the root path
-    let response =
-        send_request_to_path(Method::OPTIONS, "/", Body::empty(), None, None, None, None).await;
+    // Send an OPTIONS preflight request to a registered path
+    let response = send_request_to_path(
+        Method::OPTIONS,
+        HEALTH_CHECK_PATH,
+        Body::empty(),
+        None,
+        None,
+        None,
+        None,
+    )
+    .await;
 
     // Assert that the response status is OK
     assert_eq!(response.status(), StatusCode::OK);
@@ -282,7 +293,9 @@ async fn test_prove_request_bad_request() {
 
 /// Gets the response body as a string
 async fn get_response_body_string(response: Response<Body>) -> String {
-    let body_bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     String::from_utf8(body_bytes.to_vec()).unwrap()
 }
 
@@ -335,8 +348,29 @@ async fn send_request_to_path(
         federated_jwks,
     ));
 
-    // Serve the request
-    handler::handle_request(request, prover_service_state)
-        .await
-        .unwrap()
+    // Serve the request via axum router
+    let router = Router::new()
+        .route(
+            handler::ABOUT_PATH,
+            get(handler::about_handler).options(handler::options_handler),
+        )
+        .route(
+            handler::CONFIG_PATH,
+            get(handler::config_handler).options(handler::options_handler),
+        )
+        .route(
+            handler::HEALTH_CHECK_PATH,
+            get(handler::healthcheck_handler).options(handler::options_handler),
+        )
+        .route(
+            handler::JWK_PATH,
+            get(handler::jwk_handler).options(handler::options_handler),
+        )
+        .route(
+            handler::PROVE_PATH,
+            post(prover_handler::prove_handler).options(handler::options_handler),
+        )
+        .with_state(prover_service_state);
+
+    router.oneshot(request).await.unwrap()
 }

@@ -14,7 +14,7 @@ use aptos_crypto::{PrivateKey, Uniform};
 use aptos_infallible::Mutex;
 use aptos_keyless_common::input_processing::encoding::AsFr;
 use aptos_types::jwks::rsa::RSA_JWK;
-use hyper::{body, Body};
+use axum::body::Bytes;
 use rand::prelude::ThreadRng;
 use rand::thread_rng;
 use rust_rapidsnark::FullProver;
@@ -322,25 +322,20 @@ async fn convert_prove_and_verify(testcase: &ProofTestCase) -> Result<(), anyhow
     // Create the prover request
     let prover_request_input = testcase.convert_to_prover_request(&jwk_keypair);
     let serialized_prover_request_input = serde_json::to_string(&prover_request_input).unwrap();
-    let prove_request = hyper::Request::new(Body::from(serialized_prover_request_input));
+    let prove_request_body = Bytes::from(serialized_prover_request_input);
 
     // Send the prove request to the prover handler
-    let result = prover_handler::hande_prove_request(
+    let response = prover_handler::handle_prove_request(
         handler::MISSING_ORIGIN_STRING.into(),
-        prove_request,
+        prove_request_body,
         Arc::new(prover_service_state),
     )
     .await;
 
     // Parse the prover response
-    let prover_service_response = match result {
-        Ok(response) => {
-            let response_bytes = body::to_bytes(response.into_body()).await?;
-            let response_body = String::from_utf8(response_bytes.to_vec())?;
-            serde_json::from_str::<ProverServiceResponse>(&response_body)?
-        }
-        Err(error) => panic!("The prove handler returned an error! Error: {:?}", error),
-    };
+    let response_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
+    let response_body = String::from_utf8(response_bytes.to_vec())?;
+    let prover_service_response = serde_json::from_str::<ProverServiceResponse>(&response_body)?;
 
     // Process the prover service response
     match prover_service_response {

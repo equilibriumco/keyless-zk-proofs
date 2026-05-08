@@ -30,12 +30,12 @@ ark-bn254 = { workspace = true }
 ark-ff = { workspace = true }
 ark-groth16 = { workspace = true }
 async-trait = { workspace = true }
+axum = { workspace = true }
 base64 = { workspace = true }
 bcs = { workspace = true }
 clap = { workspace = true }
 hex = { workspace = true }
 http = { workspace = true }
-hyper = { workspace = true }
 jsonwebtoken = { workspace = true }
 maplit2 = { workspace = true }
 num-bigint = { workspace = true }
@@ -54,6 +54,8 @@ shellexpand = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

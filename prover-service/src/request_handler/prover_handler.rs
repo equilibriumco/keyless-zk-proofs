@@ -21,9 +21,10 @@ use aptos_logger::{error, warn};
 use aptos_types::keyless::Groth16Proof;
 use aptos_types::transaction::authenticator::EphemeralSignature;
 use ark_ff::PrimeField;
-use hyper::{Body, Request, Response, StatusCode};
+use axum::body::{Body, Bytes};
+use axum::extract::State;
+use axum::http::{HeaderMap, Response, StatusCode};
 use maplit2::hashmap;
-use std::convert::Infallible;
 use std::fs;
 use std::process::Command;
 use std::sync::Arc;
@@ -31,32 +32,41 @@ use std::time::Instant;
 use tempfile::NamedTempFile;
 use uuid::Uuid;
 
+/// POST /v0/prove — axum handler entry point
+pub async fn prove_handler(
+    State(prover_service_state): State<Arc<ProverServiceState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response<Body> {
+    let origin = handler::get_request_origin(&headers);
+    handle_prove_request(origin, body, prover_service_state).await
+}
+
 /// Handles a prove request
-pub async fn hande_prove_request(
+pub async fn handle_prove_request(
     origin: String,
-    request: Request<Body>,
+    body: Bytes,
     prover_service_state: Arc<ProverServiceState>,
-) -> Result<Response<Body>, Infallible> {
-    logging::run_with_empty_logger_context(hande_prove_request_inner(
+) -> Response<Body> {
+    logging::run_with_empty_logger_context(handle_prove_request_inner(
         origin,
-        request,
+        body,
         prover_service_state,
     ))
     .await
 }
 
-async fn hande_prove_request_inner(
+async fn handle_prove_request_inner(
     origin: String,
-    request: Request<Body>,
+    body: Bytes,
     prover_service_state: Arc<ProverServiceState>,
-) -> Result<Response<Body>, Infallible> {
+) -> Response<Body> {
     // Extract the prove request input
-    let prove_request_input = match extract_prove_request_input(request).await {
+    let prove_request_input = match extract_prove_request_input(body).await {
         Ok(prove_request_input) => prove_request_input,
         Err(error) => {
             let error_string = format!("Failed to extract prove request input! Error: {}", error);
             warn!("{}", error_string);
-
             return handler::generate_bad_request_response(origin, error_string);
         }
     };
@@ -73,16 +83,13 @@ async fn hande_prove_request_inner(
     let verified_input =
         match validate_prove_request_input(&prover_service_state, &prove_request_input).await {
             Ok(verified_input) => {
-                // Update the JWT attribute metrics
                 metrics::update_jwt_attribute_metrics(&verified_input);
-
                 verified_input
             }
             Err(error) => {
                 let error_string =
                     format!("Failed to validate prove request input! Error: {}", error);
                 warn!("{}", error_string);
-
                 return handler::generate_bad_request_response(origin, error_string);
             }
         };
@@ -151,27 +158,13 @@ async fn hande_prove_request_inner(
     }
 }
 
-/// Extracts the request input from the given HTTP request
-async fn extract_prove_request_input(
-    request: Request<Body>,
-) -> Result<RequestInput, ProverServiceError> {
+/// Extracts the request input from the given body bytes
+async fn extract_prove_request_input(body: Bytes) -> Result<RequestInput, ProverServiceError> {
     // Start the deserialization timer
     let deserialization_timer = Instant::now();
 
-    // Get the request body bytes
-    let request_body = request.into_body();
-    let request_bytes = match hyper::body::to_bytes(request_body).await {
-        Ok(request_bytes) => request_bytes,
-        Err(error) => {
-            return Err(ProverServiceError::BadRequest(format!(
-                "Failed to read request body bytes! Error: {}",
-                error
-            )));
-        }
-    };
-
     // Extract the request input from the request bytes
-    let request_input = match serde_json::from_slice(&request_bytes) {
+    let request_input = match serde_json::from_slice(&body) {
         Ok(request_input) => request_input,
         Err(error) => {
             return Err(ProverServiceError::BadRequest(format!(

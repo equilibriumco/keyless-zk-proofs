@@ -8,12 +8,13 @@ use aptos_metrics_core::{
     exponential_buckets, register_histogram_vec, register_int_counter_vec, Encoder, HistogramVec,
     IntCounterVec, TextEncoder,
 };
-use hyper::header::CONTENT_TYPE;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Method, Server, StatusCode};
+use axum::body::Body;
+use axum::http::header::CONTENT_TYPE;
+use axum::http::{Method, Response, StatusCode};
+use axum::routing::get;
+use axum::Router;
 use once_cell::sync::Lazy;
 use prometheus::proto::MetricFamily;
-use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -122,25 +123,13 @@ static REQUEST_JWT_ATTRIBUTE_SIZES: Lazy<HistogramVec> = Lazy::new(|| {
 });
 
 /// Handles incoming HTTP requests for the metrics server
-async fn handle_metrics_request(
-    request: hyper::Request<Body>,
-) -> Result<hyper::Response<Body>, Infallible> {
-    let response = match (request.method(), request.uri().path()) {
-        (&Method::GET, METRICS_ENDPOINT) => {
-            let buffer = get_encoded_metrics(TextEncoder::new());
-            hyper::Response::builder()
-                .status(StatusCode::OK)
-                .header(CONTENT_TYPE, PLAIN_CONTENT_TYPE)
-                .body(Body::from(buffer))
-                .expect("The metric response failed to build!")
-        }
-        _ => {
-            let mut response = hyper::Response::new(Body::empty());
-            *response.status_mut() = StatusCode::NOT_FOUND;
-            response
-        }
-    };
-    Ok(response)
+async fn metrics_handler() -> Response<Body> {
+    let buffer = get_encoded_metrics(TextEncoder::new());
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, PLAIN_CONTENT_TYPE)
+        .body(Body::from(buffer))
+        .expect("The metric response failed to build!")
 }
 
 /// A simple utility function that encodes the metrics using the given encoder
@@ -200,15 +189,14 @@ pub fn start_metrics_server(prover_service_config: Arc<ProverServiceConfig>) {
     let _handle = tokio::spawn(async move {
         info!("Starting metrics server request handler...");
 
-        // Create a service function that handles the metrics requests
-        let make_service = make_service_fn(|_conn| async {
-            Ok::<_, Infallible>(service_fn(handle_metrics_request))
-        });
+        let router = Router::new().route(METRICS_ENDPOINT, get(metrics_handler));
 
-        // Bind the socket address, and start the server
         let socket_addr = SocketAddr::from(([0, 0, 0, 0], prover_service_config.metrics_port));
-        let server = Server::bind(&socket_addr).serve(make_service);
-        if let Err(error) = server.await {
+        let listener = match tokio::net::TcpListener::bind(&socket_addr).await {
+            Ok(listener) => listener,
+            Err(error) => panic!("Metrics server bind error! Error: {}", error),
+        };
+        if let Err(error) = axum::serve(listener, router).await {
             panic!("Metrics server error! Error: {}", error);
         }
     });
