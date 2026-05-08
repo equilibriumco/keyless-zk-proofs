@@ -67,13 +67,16 @@ impl ProverServiceState {
         jwk_cache: JWKCache,
         federated_jwks: FederatedJWKs<FederatedJWKIssuer>,
     ) -> Self {
+        // Semaphore::new panics above MAX_PERMITS (usize::MAX >> 3); use
+        // the documented maximum so tests effectively get an unlimited
+        // semaphore without tripping that bound.
         Self::new_for_testing_with_semaphore_capacity(
             training_wheels_key_pair,
             prover_service_config,
             deployment_information,
             jwk_cache,
             federated_jwks,
-            usize::MAX >> 1,
+            Semaphore::MAX_PERMITS,
         )
     }
 
