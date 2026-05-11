@@ -1,6 +1,6 @@
 # Keyless ZK Circuit and ZK Proving Service
 
-> **Movement fork.** This is `movementlabsxyz/keyless-zk-proofs`'s
+> **Movement fork.** This is `equilibriumco/keyless-zk-proofs`'s
 > `movement-main` branch. For Movement-specific quick-start
 > (`docker compose up`), env knobs (rate limits, aud allowlist,
 > trusted-proxy CIDRs, etc.), the circuit-version pin, and notes on
